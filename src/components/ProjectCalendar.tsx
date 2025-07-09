@@ -19,6 +19,20 @@ import { useToast } from '@/hooks/use-toast';
 import { Task } from './TaskCard';
 import 'react-calendar/dist/Calendar.css';
 
+const eventTypeClasses: { [key: string]: string } = {
+  milestone: 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400',
+  meeting: 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400',
+  deadline: 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400',
+  other: 'bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-400',
+};
+
+const eventDotClasses: { [key: string]: string } = {
+  milestone: 'bg-green-500',
+  meeting: 'bg-blue-500',
+  deadline: 'bg-red-500',
+  other: 'bg-gray-500',
+};
+
 interface CalendarEvent {
   id: string;
   title: string;
@@ -48,6 +62,8 @@ export function ProjectCalendar({ projectId, tasks }: ProjectCalendarProps) {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [eventDialogOpen, setEventDialogOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
   const [loading, setLoading] = useState(false);
   const { user } = useAuth();
   const { toast } = useToast();
@@ -61,6 +77,27 @@ export function ProjectCalendar({ projectId, tasks }: ProjectCalendarProps) {
       event_type: 'milestone',
     },
   });
+
+  const editForm = useForm<EventFormData>({
+    resolver: zodResolver(eventFormSchema),
+    defaultValues: {
+      title: '',
+      description: '',
+      event_date: '',
+      event_type: 'milestone',
+    },
+  });
+
+  useEffect(() => {
+    if (editingEvent) {
+      editForm.reset({
+        title: editingEvent.title,
+        description: editingEvent.description || '',
+        event_date: editingEvent.event_date,
+        event_type: editingEvent.event_type as any,
+      });
+    }
+  }, [editingEvent, editForm]);
 
   useEffect(() => {
     fetchEvents();
@@ -124,6 +161,73 @@ export function ProjectCalendar({ projectId, tasks }: ProjectCalendarProps) {
     }
   };
 
+  const handleUpdateEvent = async (data: EventFormData) => {
+    if (!editingEvent) return;
+    setLoading(true);
+    try {
+      const { error } = await supabase
+        .from('calendar_events')
+        .update({
+          title: data.title,
+          description: data.description || null,
+          event_date: data.event_date,
+          event_type: data.event_type,
+        })
+        .eq('id', editingEvent.id);
+
+      if (error) throw error;
+
+      toast({
+        title: 'Success',
+        description: 'Event updated successfully',
+      });
+
+      setEditDialogOpen(false);
+      setEditingEvent(null);
+      fetchEvents();
+    } catch (err: any) {
+      console.error('Error updating event:', err);
+      toast({
+        title: 'Error',
+        description: 'Failed to update event',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteEvent = async () => {
+    if (!editingEvent) return;
+    setLoading(true);
+    try {
+      const { error } = await supabase
+        .from('calendar_events')
+        .delete()
+        .eq('id', editingEvent.id);
+
+      if (error) throw error;
+
+      toast({
+        title: 'Success',
+        description: 'Event deleted successfully',
+      });
+
+      setEditDialogOpen(false);
+      setEditingEvent(null);
+      fetchEvents();
+    } catch (err: any) {
+      console.error('Error deleting event:', err);
+      toast({
+        title: 'Error',
+        description: 'Failed to delete event',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const getTasksForDate = (date: Date) => {
     return tasks.filter(task => 
       task.due_date && isSameDay(new Date(task.due_date), date)
@@ -140,12 +244,16 @@ export function ProjectCalendar({ projectId, tasks }: ProjectCalendarProps) {
     if (view === 'month') {
       const dayTasks = getTasksForDate(date);
       const dayEvents = getEventsForDate(date);
-      const totalItems = dayTasks.length + dayEvents.length;
-      
-      if (totalItems > 0) {
+      if (dayTasks.length > 0 || dayEvents.length > 0) {
+        const indicators = [
+          ...dayEvents.map(e => eventDotClasses[e.event_type]),
+          ...(dayTasks.length ? ['bg-primary'] : []),
+        ].slice(0, 3);
         return (
-          <div className="absolute bottom-1 left-1/2 transform -translate-x-1/2">
-            <div className="w-2 h-2 bg-primary rounded-full"></div>
+          <div className="absolute bottom-1 left-1/2 transform -translate-x-1/2 flex space-x-0.5">
+            {indicators.map((color, idx) => (
+              <div key={idx} className={`w-2 h-2 rounded-full ${color}`}></div>
+            ))}
           </div>
         );
       }
@@ -274,6 +382,102 @@ export function ProjectCalendar({ projectId, tasks }: ProjectCalendarProps) {
             </Form>
           </DialogContent>
         </Dialog>
+        <Dialog
+          open={editDialogOpen}
+          onOpenChange={(open) => {
+            setEditDialogOpen(open);
+            if (!open) setEditingEvent(null);
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Edit Event</DialogTitle>
+            </DialogHeader>
+            <Form {...editForm}>
+              <form onSubmit={editForm.handleSubmit(handleUpdateEvent)} className="space-y-4">
+                <FormField
+                  control={editForm.control}
+                  name="title"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Title</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Event title" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={editForm.control}
+                  name="description"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Description</FormLabel>
+                      <FormControl>
+                        <Textarea placeholder="Event description (optional)" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={editForm.control}
+                  name="event_date"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Date</FormLabel>
+                      <FormControl>
+                        <Input type="date" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={editForm.control}
+                  name="event_type"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Event Type</FormLabel>
+                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select event type" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="milestone">Milestone</SelectItem>
+                          <SelectItem value="meeting">Meeting</SelectItem>
+                          <SelectItem value="deadline">Deadline</SelectItem>
+                          <SelectItem value="other">Other</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <div className="flex justify-between space-x-2">
+                  <Button type="button" variant="destructive" onClick={handleDeleteEvent} disabled={loading}>
+                    Delete
+                  </Button>
+                  <div className="flex space-x-2">
+                    <Button type="button" variant="outline" onClick={() => setEditDialogOpen(false)} disabled={loading}>
+                      Cancel
+                    </Button>
+                    <Button type="submit" disabled={loading}>
+                      {loading ? 'Saving...' : 'Update Event'}
+                    </Button>
+                  </div>
+                </div>
+              </form>
+            </Form>
+          </DialogContent>
+        </Dialog>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -339,7 +543,14 @@ export function ProjectCalendar({ projectId, tasks }: ProjectCalendarProps) {
               </CardHeader>
               <CardContent className="space-y-3">
                 {selectedDateEvents.map((event) => (
-                  <div key={event.id} className="p-3 rounded-lg border bg-card">
+                  <div
+                    key={event.id}
+                    className="p-3 rounded-lg border bg-card cursor-pointer"
+                    onClick={() => {
+                      setEditingEvent(event);
+                      setEditDialogOpen(true);
+                    }}
+                  >
                     <div className="flex items-start justify-between">
                       <div>
                         <h4 className="font-medium text-sm">{event.title}</h4>
@@ -349,7 +560,10 @@ export function ProjectCalendar({ projectId, tasks }: ProjectCalendarProps) {
                           </p>
                         )}
                       </div>
-                      <Badge variant="secondary" className="text-xs">
+                      <Badge
+                        variant="secondary"
+                        className={`text-xs ${eventTypeClasses[event.event_type]}`}
+                      >
                         {event.event_type}
                       </Badge>
                     </div>
@@ -389,9 +603,19 @@ export function ProjectCalendar({ projectId, tasks }: ProjectCalendarProps) {
             <CardContent>
               <div className="space-y-2">
                 {events.slice(0, 5).map((event) => (
-                  <div key={event.id} className="flex items-center justify-between text-sm">
+                  <div
+                    key={event.id}
+                    className="flex items-center justify-between text-sm cursor-pointer"
+                    onClick={() => {
+                      setEditingEvent(event);
+                      setEditDialogOpen(true);
+                    }}
+                  >
                     <span className="truncate">{event.title}</span>
-                    <Badge variant="outline" className="text-xs">
+                    <Badge
+                      variant="outline"
+                      className={`text-xs ${eventTypeClasses[event.event_type]}`}
+                    >
                       {format(new Date(event.event_date), 'MMM dd')}
                     </Badge>
                   </div>
@@ -405,5 +629,4 @@ export function ProjectCalendar({ projectId, tasks }: ProjectCalendarProps) {
         </div>
       </div>
     </div>
-  );
-}
+  );}
