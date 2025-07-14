@@ -6,17 +6,35 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Calendar, Clock, User, FolderOpen, MoreVertical, Edit, Copy, Trash2, Move, CheckCircle2, AlertCircle, Timer, Target } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Calendar, Clock, User, FolderOpen, MoreVertical, Edit, Copy, Trash2, Move, CheckCircle2, AlertCircle, Timer, Target, Save, X } from 'lucide-react';
 import { format, isAfter, isBefore, addDays } from 'date-fns';
 import { Task } from '../TaskCard';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import * as z from 'zod';
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 
 interface TaskDetailsTabProps {
   task: Task;
   teamMembers: Array<{ id: string; name: string; email?: string }>;
   onTaskUpdate: () => void;
 }
+
+const taskFormSchema = z.object({
+  title: z.string().min(1, 'Title is required').max(255, 'Title must be less than 255 characters'),
+  description: z.string().optional(),
+  status: z.enum(['todo', 'in-progress', 'review', 'done']),
+  priority: z.enum(['low', 'medium', 'high', 'critical']),
+  assignee_id: z.string().optional(),
+  due_date: z.string().optional(),
+});
+
+type TaskFormData = z.infer<typeof taskFormSchema>;
 
 const statusConfig = {
   'todo': { 
@@ -63,6 +81,20 @@ const priorityConfig = {
 export function TaskDetailsTab({ task, teamMembers, onTaskUpdate }: TaskDetailsTabProps) {
   const { toast } = useToast();
   const assignee = teamMembers.find(member => member.id === task.assignee_id);
+  const [isEditing, setIsEditing] = React.useState(false);
+  const [isLoading, setIsLoading] = React.useState(false);
+  
+  const form = useForm<TaskFormData>({
+    resolver: zodResolver(taskFormSchema),
+    defaultValues: {
+      title: task.title,
+      description: task.description || '',
+      status: task.status,
+      priority: task.priority,
+      assignee_id: task.assignee_id || 'unassigned',
+      due_date: task.due_date || '',
+    },
+  });
 
   const getInitials = (name: string) => {
     return name.split(' ').map(n => n[0]).join('').toUpperCase();
@@ -118,18 +150,64 @@ export function TaskDetailsTab({ task, teamMembers, onTaskUpdate }: TaskDetailsT
     
     fetchProgress();
   }, [task.id]);
+  
+  // Update form values when task changes
+  React.useEffect(() => {
+    form.reset({
+      title: task.title,
+      description: task.description || '',
+      status: task.status,
+      priority: task.priority,
+      assignee_id: task.assignee_id || 'unassigned',
+      due_date: task.due_date || '',
+    });
+  }, [task, form]);
 
   const dueDateStatus = getDueDateStatus();
 
+  const handleEditSubmit = async (data: TaskFormData) => {
+    setIsLoading(true);
+    try {
+      const updateData = {
+        title: data.title,
+        description: data.description || null,
+        status: data.status,
+        priority: data.priority,
+        assignee_id: data.assignee_id === 'unassigned' ? null : data.assignee_id,
+        due_date: data.due_date || null,
+        updated_at: new Date().toISOString(),
+      };
+      
+      const { error } = await supabase
+        .from('tasks')
+        .update(updateData)
+        .eq('id', task.id);
+      
+      if (error) throw error;
+      
+      toast({
+        title: "Success",
+        description: "Task updated successfully"
+      });
+      
+      setIsEditing(false);
+      onTaskUpdate();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
   const handleQuickAction = async (action: string) => {
     try {
       switch (action) {
         case 'edit':
-          // Handle edit - could open edit form or navigate to edit page
-          toast({
-            title: "Edit Task",
-            description: "Edit functionality would be implemented here"
-          });
+          setIsEditing(true);
           break;
         case 'duplicate':
           // Handle duplicate
@@ -176,9 +254,205 @@ export function TaskDetailsTab({ task, teamMembers, onTaskUpdate }: TaskDetailsT
   const priorityInfo = priorityConfig[task.priority as keyof typeof priorityConfig];
   const StatusIcon = statusInfo.icon;
 
+  if (isEditing) {
+    return (
+      <div className="h-full">
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(handleEditSubmit)} className="space-y-6">
+            {/* Task Header Card - Edit Mode */}
+            <Card className="m-6 mb-4 border-0 shadow-none bg-gradient-to-br from-card to-card/50">
+              <CardHeader className="pb-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0 space-y-4">
+                    <FormField
+                      control={form.control}
+                      name="title"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Task Title</FormLabel>
+                          <FormControl>
+                            <Input 
+                              {...field} 
+                              className="text-xl font-semibold p-3 focus:border-primary"
+                              placeholder="Enter task title"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <div className="flex flex-wrap gap-3">
+                      <FormField
+                        control={form.control}
+                        name="status"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Status</FormLabel>
+                            <FormControl>
+                              <Select onValueChange={field.onChange} value={field.value}>
+                                <SelectTrigger className="w-[140px]">
+                                  <SelectValue placeholder="Status" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="todo">To Do</SelectItem>
+                                  <SelectItem value="in-progress">In Progress</SelectItem>
+                                  <SelectItem value="review">Review</SelectItem>
+                                  <SelectItem value="done">Done</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name="priority"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Priority</FormLabel>
+                            <FormControl>
+                              <Select onValueChange={field.onChange} value={field.value}>
+                                <SelectTrigger className="w-[140px]">
+                                  <SelectValue placeholder="Priority" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="low">Low</SelectItem>
+                                  <SelectItem value="medium">Medium</SelectItem>
+                                  <SelectItem value="high">High</SelectItem>
+                                  <SelectItem value="critical">Critical</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="mt-4 pt-4 border-t border-border/50">
+                  <FormField
+                    control={form.control}
+                    name="description"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Description</FormLabel>
+                        <FormControl>
+                          <Textarea 
+                            {...field}
+                            className="min-h-[120px] resize-none focus:border-primary"
+                            placeholder="Enter task description..."
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </CardHeader>
+            </Card>
+            
+            {/* Details Card - Edit Mode */}
+            <Card className="mx-6 mb-6">
+              <CardHeader>
+                <h3 className="font-semibold flex items-center gap-2">
+                  <FolderOpen className="h-4 w-4 text-primary" />
+                  Task Details
+                </h3>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* Assignee */}
+                <FormField
+                  control={form.control}
+                  name="assignee_id"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Assignee</FormLabel>
+                      <FormControl>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Select assignee" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="unassigned">Unassigned</SelectItem>
+                            {teamMembers.map((member) => (
+                              <SelectItem key={member.id} value={member.id}>
+                                {member.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                
+                {/* Due Date */}
+                <FormField
+                  control={form.control}
+                  name="due_date"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Due Date</FormLabel>
+                      <FormControl>
+                        <Input 
+                          type="date" 
+                          {...field} 
+                          className="w-full focus:border-primary" 
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </CardContent>
+            </Card>
+            
+            {/* Action Buttons */}
+            <div className="mx-6 mb-6 flex items-center justify-end gap-3">
+              <Button 
+                type="button"
+                variant="outline"
+                size="sm" 
+                className="h-9 px-4"
+                onClick={() => {
+                  setIsEditing(false);
+                  form.reset({
+                    title: task.title,
+                    description: task.description || '',
+                    status: task.status,
+                    priority: task.priority,
+                    assignee_id: task.assignee_id || 'unassigned',
+                    due_date: task.due_date || '',
+                  });
+                }}
+                disabled={isLoading}
+              >
+                <X className="h-4 w-4 mr-2" />
+                Cancel
+              </Button>
+              <Button 
+                type="submit"
+                size="sm" 
+                className="h-9 px-4"
+                disabled={isLoading}
+              >
+                <Save className="h-4 w-4 mr-2" />
+                {isLoading ? 'Saving...' : 'Save'}
+              </Button>
+            </div>
+          </form>
+        </Form>
+      </div>
+    );
+  }
+
   return (
     <div className="h-full">
-      {/* Task Header Card */}
+      {/* Task Header Card - View Mode */}
       <Card className="m-6 mb-4 border-0 shadow-none bg-gradient-to-br from-card to-card/50">
         <CardHeader className="pb-4">
           <div className="flex items-start justify-between gap-4">

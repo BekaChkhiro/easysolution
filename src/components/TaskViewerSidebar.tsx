@@ -12,6 +12,7 @@ interface TaskViewerSidebarProps {
   taskId: string | null;
   isOpen: boolean;
   onClose: () => void;
+  onTaskUpdate?: () => void;
 }
 
 interface TaskViewerState {
@@ -23,7 +24,7 @@ interface TaskViewerState {
   error: string | null;
 }
 
-export function TaskViewerSidebar({ taskId, isOpen, onClose }: TaskViewerSidebarProps) {
+export function TaskViewerSidebar({ taskId, isOpen, onClose, onTaskUpdate }: TaskViewerSidebarProps) {
   const [state, setState] = useState<TaskViewerState>({
     activeTab: 'details',
     isLoading: false,
@@ -165,6 +166,11 @@ export function TaskViewerSidebar({ taskId, isOpen, onClose }: TaskViewerSidebar
         teamMembers,
         isLoading: false
       }));
+
+      // Notify parent component of task update
+      if (onTaskUpdate) {
+        onTaskUpdate();
+      }
     } catch (error: any) {
       console.error('Error fetching task data:', error);
       setState(prev => ({

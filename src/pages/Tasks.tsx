@@ -93,6 +93,23 @@ export default function Tasks() {
       fetchAllTasks(),
       fetchTeamMembers()
     ]);
+
+    // Set up real-time subscriptions for task updates
+    const taskSubscription = supabase
+      .channel('tasks_channel')
+      .on('postgres_changes', 
+        { event: '*', schema: 'public', table: 'tasks' }, 
+        (payload) => {
+          console.log('Task change detected:', payload);
+          fetchProjects();
+          fetchAllTasks();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      taskSubscription.unsubscribe();
+    };
   }, [user]);
 
   useEffect(() => {
@@ -779,6 +796,10 @@ export default function Tasks() {
         taskId={selectedTaskId}
         isOpen={sidebarOpen}
         onClose={handleSidebarClose}
+        onTaskUpdate={() => {
+          fetchProjects();
+          fetchAllTasks();
+        }}
       />
     </div>
   );

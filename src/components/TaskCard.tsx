@@ -158,10 +158,6 @@ export function TaskCard({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => onEdit(task)}>
-                  <Edit className="h-4 w-4 mr-2" />
-                  Edit Task
-                </DropdownMenuItem>
                 <DropdownMenuItem 
                   onClick={() => setShowDeleteDialog(true)}
                   className="text-destructive"
@@ -214,14 +210,6 @@ export function TaskCard({
                 {commentCount > 0 && (
                   <span className="ml-1 text-xs">{commentCount}</span>
                 )}
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2"
-                onClick={() => openTaskEdit(task.id, 'edit')}
-              >
-                <Edit className="h-3 w-3" />
               </Button>
               <select
                 value={task.status}

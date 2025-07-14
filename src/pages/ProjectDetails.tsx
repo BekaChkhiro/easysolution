@@ -98,6 +98,23 @@ export default function ProjectDetails() {
     fetchProjectStats();
     fetchTasks();
     fetchTeamMembers();
+
+    // Set up real-time subscriptions for task updates
+    const taskSubscription = supabase
+      .channel('project_tasks_channel')
+      .on('postgres_changes', 
+        { event: '*', schema: 'public', table: 'tasks' }, 
+        (payload) => {
+          console.log('Task change detected:', payload);
+          fetchTasks();
+          fetchProjectStats();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      taskSubscription.unsubscribe();
+    };
   }, [id, user]);
 
   const fetchProject = async () => {
@@ -816,6 +833,10 @@ export default function ProjectDetails() {
         taskId={selectedTaskId}
         isOpen={sidebarOpen}
         onClose={handleSidebarClose}
+        onTaskUpdate={() => {
+          fetchTasks();
+          fetchProjectStats();
+        }}
       />
     </div>
   );
